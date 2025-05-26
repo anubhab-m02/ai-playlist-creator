@@ -1,19 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { useFirebase } from '../firebase'; // Corrected import path
+import { useFirebase } from '../firebase'; 
 import PlaylistCard from './PlaylistCard';
 import Modal from './Modal';
 import Alert from './Alert';
-import { Loader2, Music, LogIn } from 'lucide-react';
-import { collection, query, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
+import { Loader2, Music, LogIn, ChevronDown, ChevronUp, Archive as ArchiveIcon } from 'lucide-react'; // Added Chevron icons
+import { collection, query, onSnapshot, doc, deleteDoc, updateDoc, serverTimestamp, orderBy } from 'firebase/firestore';
 
 
-const Dashboard = ({ onEditPlaylist }) => {
+const Dashboard = ({ onEditPlaylist, onRemixPlaylist }) => { // Added onRemixPlaylist
     const { db, currentUser, appId, isLoadingAuth } = useFirebase();
-    const [playlists, setPlaylists] = useState([]);
+    const [activePlaylists, setActivePlaylists] = useState([]);
+    const [archivedPlaylists, setArchivedPlaylists] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [playlistToDelete, setPlaylistToDelete] = useState(null);
+    const [showArchived, setShowArchived] = useState(false); // State for toggling archived section
 
     useEffect(() => {
         if (isLoadingAuth) {
@@ -23,23 +25,45 @@ const Dashboard = ({ onEditPlaylist }) => {
         if (!currentUser || !db) {
             setError(!currentUser ? "Please sign in to view your mixtapes." : "Database not available.");
             setIsLoading(false);
-            setPlaylists([]);
+            setActivePlaylists([]);
+            setArchivedPlaylists([]);
             return;
         }
         
         setIsLoading(true);
         setError(null);
         const playlistsCollectionPath = `artifacts/${appId}/users/${currentUser.uid}/playlists`;
-        const q = query(collection(db, playlistsCollectionPath));
+        // Order by 'updatedAt' in descending order to show newest first.
+        // Firestore requires an index for this. If you haven't created one, 
+        // you'll see an error in the console with a link to create it.
+        const q = query(collection(db, playlistsCollectionPath), orderBy("updatedAt", "desc"));
+
 
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
-            const playlistsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            playlistsData.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
-            setPlaylists(playlistsData);
+            const allPlaylistsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            
+            const active = [];
+            const archived = [];
+
+            allPlaylistsData.forEach(playlist => {
+                if (playlist.isArchived) {
+                    archived.push(playlist);
+                } else {
+                    active.push(playlist);
+                }
+            });
+            
+            // No need to sort again if Firestore query already handles it.
+            // If not using Firestore orderBy, sort here:
+            // active.sort((a, b) => (b.updatedAt?.toMillis() || 0) - (a.updatedAt?.toMillis() || 0));
+            // archived.sort((a, b) => (b.updatedAt?.toMillis() || 0) - (a.updatedAt?.toMillis() || 0));
+
+            setActivePlaylists(active);
+            setArchivedPlaylists(archived);
             setIsLoading(false);
         }, (err) => {
             console.error("Error fetching playlists:", err);
-            setError("Failed to load your mixtapes. Firestore permissions might be incorrect or network issue.");
+            setError("Failed to load your mixtapes. Firestore permissions might be incorrect, network issue, or missing index for ordering. Check console for details.");
             setIsLoading(false);
         });
         return () => unsubscribe();
@@ -61,6 +85,7 @@ const Dashboard = ({ onEditPlaylist }) => {
             const playlistDocRef = doc(db, `artifacts/${appId}/users/${currentUser.uid}/playlists`, playlistToDelete);
             await deleteDoc(playlistDocRef);
             // Playlist will be removed from UI via onSnapshot
+            setError(null); // Clear any previous error
         } catch (err) {
             console.error("Error deleting playlist:", err);
             setError("Failed to delete mixtape.");
@@ -71,6 +96,28 @@ const Dashboard = ({ onEditPlaylist }) => {
         }
     };
 
+    const handleArchiveToggle = async (playlistId, currentArchivedStatus) => {
+        if (!db || !currentUser || !playlistId) {
+            setError("Cannot update archive status: Missing information.");
+            setTimeout(() => setError(null), 3000);
+            return;
+        }
+        try {
+            const playlistDocRef = doc(db, `artifacts/${appId}/users/${currentUser.uid}/playlists`, playlistId);
+            await updateDoc(playlistDocRef, {
+                isArchived: !currentArchivedStatus,
+                updatedAt: serverTimestamp() // Update timestamp to reflect change
+            });
+             setError(null); // Clear any previous error
+            // UI will update via onSnapshot
+        } catch (err) {
+            console.error("Error toggling archive status:", err);
+            setError(`Failed to ${currentArchivedStatus ? 'unarchive' : 'archive'} mixtape.`);
+            setTimeout(() => setError(null), 3000);
+        }
+    };
+
+
     if (isLoading || isLoadingAuth) return <div className="flex justify-center items-center flex-grow"><Loader2 className="h-10 w-10 animate-spin text-purple-400" /> <p className="ml-3 text-lg">Loading your mixtapes...</p></div>;
     
     if (!currentUser && !isLoadingAuth) {
@@ -80,10 +127,8 @@ const Dashboard = ({ onEditPlaylist }) => {
             <p>Sign in to create and view your mixtapes.</p>
         </div>;
     }
-
-    if (error) return <Alert type="error">{error}</Alert>;
     
-    if (playlists.length === 0 && !isLoading) {
+    if (activePlaylists.length === 0 && archivedPlaylists.length === 0 && !isLoading && !error) {
         return <div className="text-center text-gray-400 py-10 flex-grow flex flex-col items-center justify-center">
             <Music className="h-16 w-16 mx-auto mb-4 text-gray-500" />
             <h2 className="text-2xl font-semibold mb-2">No Mixtapes Yet!</h2>
@@ -92,21 +137,63 @@ const Dashboard = ({ onEditPlaylist }) => {
     }
 
     return (
-        <div className="space-y-6">
-            <h2 className="text-3xl font-semibold text-purple-300 mb-6">My Mixtapes</h2>
-            {playlists.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                    {playlists.map(playlist => (
-                        <PlaylistCard key={playlist.id} playlist={playlist} onEdit={() => onEditPlaylist(playlist)} onDelete={() => requestDeletePlaylist(playlist.id)} />
-                    ))}
-                </div>
-            ) : (
-                 <div className="text-center text-gray-400 py-10"> {/* Fallback if playlists array is empty after loading */}
-                    <Music className="h-16 w-16 mx-auto mb-4 text-gray-500" />
-                    <h2 className="text-2xl font-semibold mb-2">No Mixtapes Found</h2>
-                    <p>Start by creating a new mixtape!</p>
+        <div className="space-y-8">
+            {error && <Alert type="error">{error}</Alert>}
+            
+            <div>
+                <h2 className="text-3xl font-semibold text-purple-300 mb-6">My Active Mixtapes ({activePlaylists.length})</h2>
+                {activePlaylists.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        {activePlaylists.map(playlist => (
+                            <PlaylistCard 
+                                key={playlist.id} 
+                                playlist={playlist} 
+                                onEdit={() => onEditPlaylist(playlist)} 
+                                onDelete={() => requestDeletePlaylist(playlist.id)}
+                                onArchiveToggle={handleArchiveToggle}
+                                onRemix={() => onRemixPlaylist(playlist)}
+                            />
+                        ))}
+                    </div>
+                ) : (
+                     <div className="text-center text-gray-400 py-6 border-2 border-dashed border-slate-700 rounded-lg">
+                        <Music className="h-12 w-12 mx-auto mb-3 text-gray-500" />
+                        <p className="text-lg">No active mixtapes found.</p>
+                        <p className="text-sm">Create a new one or check your archive!</p>
+                    </div>
+                )}
+            </div>
+
+            {archivedPlaylists.length > 0 && (
+                 <div>
+                    <button 
+                        onClick={() => setShowArchived(!showArchived)}
+                        className="flex items-center justify-between w-full text-left px-4 py-3 bg-slate-700/50 hover:bg-slate-700 rounded-lg transition-colors mb-4 focus:outline-none"
+                    >
+                        <div className="flex items-center">
+                            <ArchiveIcon className="h-6 w-6 mr-3 text-amber-400" />
+                            <h2 className="text-2xl font-semibold text-purple-300">Archived Mixtapes ({archivedPlaylists.length})</h2>
+                        </div>
+                        {showArchived ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
+                    </button>
+                    {showArchived && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mt-4">
+                            {archivedPlaylists.map(playlist => (
+                                <PlaylistCard 
+                                    key={playlist.id} 
+                                    playlist={playlist} 
+                                    onDelete={() => requestDeletePlaylist(playlist.id)}
+                                    onArchiveToggle={handleArchiveToggle}
+                                    // Edit and Remix are typically disabled for archived items
+                                    onEdit={() => { setError("Unarchive first to edit."); setTimeout(()=>setError(null), 3000);}} 
+                                    onRemix={() => { setError("Unarchive first to remix."); setTimeout(()=>setError(null), 3000);}}
+                                />
+                            ))}
+                        </div>
+                    )}
                 </div>
             )}
+
             {showDeleteConfirm && (
                 <Modal title="Confirm Delete" onClose={() => { setShowDeleteConfirm(false); setPlaylistToDelete(null); }}>
                     <p className="text-gray-300 mb-6">Are you sure you want to delete this mixtape? This action cannot be undone.</p>

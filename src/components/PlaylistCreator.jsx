@@ -4,7 +4,9 @@ import Alert from './Alert';
 import PlaylistFormHeader from './PlaylistFormHeader';
 import GeminiSuggestionsDisplay from './GeminiSuggestionsDisplay';
 import CurrentMixtapeDisplay from './CurrentMixtapeDisplay';
-import { Loader2, Image as ImageIcon, Sparkles, LogIn, ChevronLeft, Save, Lightbulb } from 'lucide-react';
+import Modal from './Modal'; // Import Modal
+import ManageTagsModal from './ManageTagsModal';
+import { Loader2, Image as ImageIcon, Sparkles, LogIn, ChevronLeft, Save, Lightbulb, AlertTriangle, Tags } from 'lucide-react'; 
 import { collection, addDoc, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 
 const formatDuration = (totalMilliseconds) => {
@@ -19,7 +21,7 @@ const formatDuration = (totalMilliseconds) => {
     return `${paddedMinutes}:${paddedSeconds}`;
 };
 
-const PlaylistCreator = ({ existingPlaylist, onSaveSuccess }) => {
+const PlaylistCreator = ({ existingPlaylist, onSaveSuccess, isRemix = false }) => {
     const { db, currentUser, appId, isLoadingAuth } = useFirebase();
 
     const [theme, setTheme] = useState('');
@@ -55,6 +57,15 @@ const PlaylistCreator = ({ existingPlaylist, onSaveSuccess }) => {
     const [editingNoteForSongId, setEditingNoteForSongId] = useState(null);
     const [currentSongNote, setCurrentSongNote] = useState('');
 
+    // --- START: State for Duplicate Song Modal ---
+    const [showDuplicateSongModal, setShowDuplicateSongModal] = useState(false);
+    const [songToAddDespiteDuplicate, setSongToAddDespiteDuplicate] = useState(null);
+    // --- END: State for Duplicate Song Modal ---
+    
+    const [isManageTagsModalOpen, setIsManageTagsModalOpen] = useState(false);
+    const [editingPlaylistId, setEditingPlaylistId] = useState(null);
+
+
     const dragSongItem = useRef(null);
     const dragOverSongItem = useRef(null);
     const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
@@ -62,18 +73,20 @@ const PlaylistCreator = ({ existingPlaylist, onSaveSuccess }) => {
     useEffect(() => {
         if (isLoadingAuth) return;
         if (!currentUser) {
-            if (onSaveSuccess) onSaveSuccess(); // Navigate away if user gets signed out
+            if (onSaveSuccess) onSaveSuccess(); 
             return;
         }
+
         if (existingPlaylist) {
-            setTheme(existingPlaylist.theme || '');
+            setTheme(isRemix ? `Remix of ${existingPlaylist.theme || 'Untitled'}` : existingPlaylist.theme || '');
             setOriginalThemePrompt(existingPlaylist.originalThemePrompt || existingPlaylist.theme || '');
-            setSongs(existingPlaylist.songs?.map(s => ({ ...s, id: s.id || crypto.randomUUID(), duration_ms: s.duration_ms || (180000 + Math.floor(Math.random() * 60000)), personalNote: s.personalNote || '' })) || []);
+            // Ensure new unique IDs for songs in a remix to avoid issues with React keys if user adds original songs back
+            setSongs(existingPlaylist.songs?.map(s => ({ ...s, id: crypto.randomUUID(), duration_ms: s.duration_ms || (180000 + Math.floor(Math.random() * 60000)), personalNote: s.personalNote || '' })) || []);
             setLinerNotes(existingPlaylist.linerNotes || '');
             setCoverArtUrl(existingPlaylist.coverArtUrl || '');
             setTags(existingPlaylist.tags || []);
             setSeedSongInputs(existingPlaylist.seedSongs || []);
-            setIsPublic(existingPlaylist.isPublic || false);
+            setIsPublic(existingPlaylist.isPublic || false); 
             setStartYear(existingPlaylist.startYear || '');
             setEndYear(existingPlaylist.endYear || '');
             setPreferHiddenGems(existingPlaylist.preferHiddenGems || false);
@@ -83,15 +96,24 @@ const PlaylistCreator = ({ existingPlaylist, onSaveSuccess }) => {
             setFusionGenres(existingPlaylist.fusionGenres || []);
             setStoryNarrative(existingPlaylist.storyNarrative || '');
             setVibeArcDescription(existingPlaylist.vibeArcDescription || '');
-        } else { // Reset form for new playlist
+            
+            if (isRemix) {
+                setEditingPlaylistId(null); 
+                displaySuccess("Remixing mixtape! All changes will create a new copy.");
+            } else {
+                setEditingPlaylistId(existingPlaylist.id); 
+            }
+
+        } else { 
             setTheme(''); setOriginalThemePrompt(''); setSongs([]); setLinerNotes(''); setCoverArtUrl(''); setTags([]); setSeedSongInputs([]);
             setIsPublic(false);
             setStartYear(''); setEndYear(''); setPreferHiddenGems(false); setLanguagePreferences('');
             setExcludeKeywords(''); setInstrumentalVocalRatio('balanced'); setFusionGenres([]);
             setStoryNarrative(''); setVibeArcDescription('');
+            setEditingPlaylistId(null);
         }
         setAiSuggestions([]); setSuggestedTitles([]); setError(null); setSuccessMessage(null); setFuturePlaylistIdeas([]);
-    }, [existingPlaylist, currentUser, isLoadingAuth, onSaveSuccess]);
+    }, [existingPlaylist, currentUser, isLoadingAuth, onSaveSuccess, isRemix]);
 
     const displayError = (message) => { console.error("PC Error:", message); setError(message); setTimeout(() => setError(null), 4000); };
     const displaySuccess = (message) => { console.log("PC Success:", message); setSuccessMessage(message); setTimeout(() => setSuccessMessage(null), 3000); };
@@ -143,7 +165,7 @@ const PlaylistCreator = ({ existingPlaylist, onSaveSuccess }) => {
             return responseSchema ? JSON.parse(textResponse) : textResponse;
         } catch (error) {
             console.error("PC: callGeminiAPI - Fetch or Parsing Error:", error);
-            throw error; // Re-throw to be caught by calling function
+            throw error; 
         }
     };
 
@@ -251,27 +273,61 @@ const PlaylistCreator = ({ existingPlaylist, onSaveSuccess }) => {
         }
     };
 
-    const addSongToPlaylist = (song) => {
-        try {
-            console.log("PC: addSongToPlaylist - START. Song:", song);
-            if (!song || typeof song.title !== 'string' || typeof song.artist !== 'string') {
-                console.warn("Attempted to add invalid song object:", song);
-                displayError("Cannot add invalid song data.");
-                return;
-            }
-            if (!songs.some(s => s.title.toLowerCase() === song.title.toLowerCase() && s.artist.toLowerCase() === song.artist.toLowerCase())) {
-                const songToAdd = { ...song, id: song.id || crypto.randomUUID(), duration_ms: song.duration_ms || (180000 + Math.floor(Math.random() * 60000)), personalNote: '' };
-                setSongs(prev => [...prev, songToAdd]);
-                displaySuccess(`"${song.title}" added to mixtape!`);
-            } else {
-                displaySuccess(`"${song.title}" is already in your mixtape.`);
-            }
-            console.log("PC: addSongToPlaylist - END");
-        } catch(e) {
-            console.error("PC: addSongToPlaylist - CRITICAL ERROR:", e);
-            displayError("Error adding song: " + e.message);
+    // --- START: Modified addSongToPlaylist and new handlers for duplicate detection ---
+    const addSongToPlaylist = (songCandidate) => {
+        console.log("PC: addSongToPlaylist - Candidate:", songCandidate);
+        if (!songCandidate || typeof songCandidate.title !== 'string' || typeof songCandidate.artist !== 'string') {
+            console.warn("Attempted to add invalid song object:", songCandidate);
+            displayError("Cannot add invalid song data.");
+            return;
         }
+
+        const isDuplicate = songs.some(
+            s => s.title.toLowerCase() === songCandidate.title.toLowerCase() && 
+                 s.artist.toLowerCase() === songCandidate.artist.toLowerCase()
+        );
+
+        if (isDuplicate) {
+            console.log("PC: Duplicate song detected - ", songCandidate.title);
+            setSongToAddDespiteDuplicate(songCandidate);
+            setShowDuplicateSongModal(true);
+        } else {
+            const songToAdd = { 
+                ...songCandidate, 
+                id: songCandidate.id || crypto.randomUUID(), 
+                duration_ms: songCandidate.duration_ms || (180000 + Math.floor(Math.random() * 60000)), 
+                personalNote: '' 
+            };
+            setSongs(prev => [...prev, songToAdd]);
+            displaySuccess(`"${songToAdd.title}" added to mixtape!`);
+        }
+        console.log("PC: addSongToPlaylist - END");
     };
+
+    const handleAddAnyway = () => {
+        if (songToAddDespiteDuplicate) {
+            console.log("PC: handleAddAnyway - Adding:", songToAddDespiteDuplicate.title);
+            const songToAdd = { 
+                ...songToAddDespiteDuplicate, 
+                id: crypto.randomUUID(), 
+                duration_ms: songToAddDespiteDuplicate.duration_ms || (180000 + Math.floor(Math.random() * 60000)), 
+                personalNote: '' 
+            };
+            setSongs(prev => [...prev, songToAdd]);
+            displaySuccess(`"${songToAdd.title}" added again to mixtape!`);
+        }
+        setShowDuplicateSongModal(false);
+        setSongToAddDespiteDuplicate(null);
+        console.log("PC: handleAddAnyway - END");
+    };
+
+    const handleCancelAddDuplicate = () => {
+        console.log("PC: handleCancelAddDuplicate");
+        setShowDuplicateSongModal(false);
+        setSongToAddDespiteDuplicate(null);
+    };
+    // --- END: Modified addSongToPlaylist and new handlers ---
+
     const removeSongFromPlaylist = (songId) => { console.log("PC: removeSongFromPlaylist for ID:", songId); setSongs(prev => prev.filter(s => s.id !== songId)); };
 
     const handleAddTag = () => {
@@ -292,10 +348,17 @@ const PlaylistCreator = ({ existingPlaylist, onSaveSuccess }) => {
     };
 
     const handleRemoveTag = (tagToRemove) => {
-        console.log("PC: handleRemoveTag - Removing:", tagToRemove);
+        console.log("PC: handleRemoveTag (from PlaylistFormHeader) - Removing:", tagToRemove);
         setTags(prevTags => prevTags.filter(tag => tag !== tagToRemove));
         console.log("PC: handleRemoveTag - END. Current tags:", tags);
     };
+
+    const handleSaveManagedTags = (newTagsList) => {
+        setTags(newTagsList); 
+        displaySuccess("Tags updated successfully!");
+        console.log("PC: Tags updated from modal:", newTagsList);
+    };
+
 
     const handleEditSongNote = (songId) => {
         console.log("PC: handleEditSongNote for ID:", songId);
@@ -326,20 +389,14 @@ const PlaylistCreator = ({ existingPlaylist, onSaveSuccess }) => {
         console.log("PC: handleDragStart - position:", position);
         dragSongItem.current = position;
         e.dataTransfer.effectAllowed = "move";
-        // Optional: Add a class for visual feedback
-        // e.currentTarget.classList.add('dragging');
     };
 
     const handleDragEnter = (e, position) => {
         console.log("PC: handleDragEnter - position:", position);
         dragOverSongItem.current = position;
-        // Optional: Visual feedback for drop target
-        // e.currentTarget.classList.add('dragover');
     };
     
     const handleDragLeave = (e) => {
-        // Optional: Remove visual feedback if item is dragged out of a potential target
-        // e.currentTarget.classList.remove('dragover');
     };
 
     const handleDrop = (e, dropPosition) => {
@@ -347,24 +404,19 @@ const PlaylistCreator = ({ existingPlaylist, onSaveSuccess }) => {
         const newSongs = [...songs];
         const draggedItemContent = newSongs[dragSongItem.current];
         newSongs.splice(dragSongItem.current, 1);
-        newSongs.splice(dropPosition, 0, draggedItemContent); // Use dropPosition directly
+        newSongs.splice(dropPosition, 0, draggedItemContent); 
         dragSongItem.current = null;
-        dragOverSongItem.current = null; // Reset this too
+        dragOverSongItem.current = null; 
         setSongs(newSongs);
-        // Optional: Remove visual feedback classes
-        // e.currentTarget.classList.remove('dragover');
     };
 
     const handleDragEnd = (e) => {
         console.log("PC: handleDragEnd");
-        // Optional: Clean up any visual feedback classes
-        // e.currentTarget.classList.remove('dragging');
-        // Array.from(songsListRef.current.children).forEach(child => child.classList.remove('dragover'));
         dragSongItem.current = null;
         dragOverSongItem.current = null;
     };
     
-    const handleDragOver = (e) => { e.preventDefault(); }; // Necessary for onDrop to fire
+    const handleDragOver = (e) => { e.preventDefault(); }; 
 
     const handleAddSeedSong = () => {
         console.log("PC: handleAddSeedSong - START. currentSeedSong:", currentSeedSong);
@@ -441,7 +493,7 @@ const PlaylistCreator = ({ existingPlaylist, onSaveSuccess }) => {
     };
 
     const handleSavePlaylistToFirestore = async () => {
-        console.log("PC: handleSavePlaylistToFirestore - START");
+        console.log("PC: handleSavePlaylistToFirestore - START. Editing ID:", editingPlaylistId, "Is Remix:", isRemix);
         if (!currentUser || !db) {
             displayError("User not signed in or database not available. Cannot save.");
             return;
@@ -460,7 +512,7 @@ const PlaylistCreator = ({ existingPlaylist, onSaveSuccess }) => {
         const playlistData = {
             theme: theme.trim(),
             originalThemePrompt: originalThemePrompt.trim(),
-            songs: songs.map(s => ({ // Ensure only necessary fields are saved
+            songs: songs.map(s => ({ 
                 id: s.id, 
                 title: s.title, 
                 artist: s.artist, 
@@ -484,23 +536,30 @@ const PlaylistCreator = ({ existingPlaylist, onSaveSuccess }) => {
             vibeArcDescription: vibeArcDescription.trim(),
             userId: currentUser.uid,
             updatedAt: serverTimestamp(),
+            isArchived: false, 
         };
 
         try {
-            if (existingPlaylist && existingPlaylist.id) {
-                playlistData.updatedAt = serverTimestamp(); // Ensure updatedAt is always fresh
-                const playlistDocRef = doc(db, `artifacts/${appId}/users/${currentUser.uid}/playlists`, existingPlaylist.id);
+            if (editingPlaylistId && !isRemix) { 
+                playlistData.updatedAt = serverTimestamp(); 
+                if (existingPlaylist && existingPlaylist.createdAt) {
+                    playlistData.createdAt = existingPlaylist.createdAt;
+                }
+                 if (existingPlaylist && typeof existingPlaylist.isArchived === 'boolean') { // Preserve existing archive status on update
+                    playlistData.isArchived = existingPlaylist.isArchived;
+                }
+                const playlistDocRef = doc(db, `artifacts/${appId}/users/${currentUser.uid}/playlists`, editingPlaylistId);
                 await updateDoc(playlistDocRef, playlistData);
                 displaySuccess("Mixtape updated successfully!");
-                console.log("PC: Mixtape updated in Firestore, ID:", existingPlaylist.id);
-            } else {
+                console.log("PC: Mixtape updated in Firestore, ID:", editingPlaylistId);
+            } else { 
                 playlistData.createdAt = serverTimestamp();
                 const docRef = await addDoc(collection(db, `artifacts/${appId}/users/${currentUser.uid}/playlists`), playlistData);
                 displaySuccess("Mixtape saved successfully!");
                 console.log("PC: Mixtape saved to Firestore, new ID:", docRef.id);
             }
             if (onSaveSuccess) {
-                onSaveSuccess(); // Navigate back to dashboard or clear form
+                onSaveSuccess(); 
             }
         } catch (err) {
             console.error("PC: handleSavePlaylistToFirestore - CRITICAL ERROR:", err);
@@ -513,34 +572,68 @@ const PlaylistCreator = ({ existingPlaylist, onSaveSuccess }) => {
 
     const songsListRef = useRef(null);
     useEffect(() => {
-        // Auto-scroll to the bottom of the song list when a new song is added
         if (songsListRef.current && songs.length > 0) {
-            // Check if the last song added is visible, if not, scroll.
-            // This is a simplification; a more robust check might be needed for edge cases.
             const lastSongElement = songsListRef.current.lastElementChild;
             if (lastSongElement) {
-                // A small delay can sometimes help ensure the element is fully rendered before scrolling
                 setTimeout(() => lastSongElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 100);
             }
         }
-    }, [songs.length]); // Trigger only when the number of songs changes
+    }, [songs.length]); 
 
     const totalPlaylistDurationMs = useMemo(() => songs.reduce((total, song) => total + (Number(song.duration_ms) || 0), 0), [songs]);
 
     if (isLoadingAuth) {
          return (<div className="flex flex-col items-center justify-center flex-grow"><Loader2 className="h-12 w-12 animate-spin text-purple-400" /><p className="mt-4 text-lg">Loading Creator...</p></div>);
     }
-    if (!currentUser && !isLoadingAuth) { // Check !isLoadingAuth to ensure auth state is resolved
+    if (!currentUser && !isLoadingAuth) { 
         return (<div className="text-center py-10 text-gray-400 flex-grow flex flex-col items-center justify-center"><LogIn size={48} className="mx-auto mb-4" /><h2 className="text-2xl mb-2">Please sign in</h2><p>You need to be signed in to create or edit a mixtape.</p></div>);
     }
 
     return (
         <div className="max-w-4xl mx-auto bg-slate-800/70 p-6 md:p-8 rounded-xl shadow-2xl space-y-8 backdrop-blur-sm">
+            {/* --- START: Duplicate Song Modal --- */}
+            {showDuplicateSongModal && songToAddDespiteDuplicate && (
+                <Modal title="Duplicate Song Alert" onClose={handleCancelAddDuplicate}>
+                    <div className="text-center">
+                        <AlertTriangle size={48} className="mx-auto mb-4 text-yellow-400" />
+                        <p className="text-lg text-gray-200 mb-2">
+                            The song <strong className="text-purple-300">"{songToAddDespiteDuplicate.title}"</strong> by <strong className="text-purple-300">{songToAddDespiteDuplicate.artist}</strong> is already in your mixtape.
+                        </p>
+                        <p className="text-gray-400 mb-6">Do you want to add it again?</p>
+                        <div className="flex justify-center space-x-4">
+                            <button
+                                onClick={handleCancelAddDuplicate}
+                                className="px-6 py-2 rounded-md text-sm font-medium bg-slate-600 hover:bg-slate-500 text-white transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleAddAnyway}
+                                className="px-6 py-2 rounded-md text-sm font-medium bg-purple-600 hover:bg-purple-700 text-white transition-colors"
+                            >
+                                Add Anyway
+                            </button>
+                        </div>
+                    </div>
+                </Modal>
+            )}
+            {/* --- END: Duplicate Song Modal --- */}
+            
+            <ManageTagsModal
+                isOpen={isManageTagsModalOpen}
+                onClose={() => setIsManageTagsModalOpen(false)}
+                currentTags={tags}
+                onSaveTags={handleSaveManagedTags} 
+            />
+
+
             <div>
                 <button type="button" onClick={() => { console.log("PC: Back to Dashboard clicked"); if(onSaveSuccess) onSaveSuccess(); }} className="flex items-center text-purple-400 hover:text-purple-300 mb-4 text-sm transition-colors">
                     <ChevronLeft size={18} className="mr-1" /> Back to Dashboard
                 </button>
-                <h2 className="text-3xl font-semibold text-purple-300 mb-1">{existingPlaylist ? 'Edit Mixtape' : 'Create New Mixtape'}</h2>
+                <h2 className="text-3xl font-semibold text-purple-300 mb-1">
+                    {editingPlaylistId && !isRemix ? 'Edit Mixtape' : (isRemix ? 'Remixing Mixtape' : 'Create New Mixtape')}
+                </h2>
                 <p className="text-sm text-gray-400">Craft the perfect vibe, one track at a time.</p>
             </div>
 
@@ -560,7 +653,8 @@ const PlaylistCreator = ({ existingPlaylist, onSaveSuccess }) => {
                 setCurrentTagInput={setCurrentTagInput}
                 handleAddTag={handleAddTag}
                 tags={tags}
-                handleRemoveTag={handleRemoveTag}
+                handleRemoveTag={handleRemoveTag} 
+                onOpenManageTags={() => setIsManageTagsModalOpen(true)} 
                 currentSeedSong={currentSeedSong}
                 setCurrentSeedSong={setCurrentSeedSong}
                 handleAddSeedSong={handleAddSeedSong}
@@ -592,7 +686,7 @@ const PlaylistCreator = ({ existingPlaylist, onSaveSuccess }) => {
                     />
                     <CurrentMixtapeDisplay
                         songs={songs}
-                        songsListRef={songsListRef} // Pass the ref
+                        songsListRef={songsListRef} 
                         totalPlaylistDurationMs={totalPlaylistDurationMs}
                         formatDuration={formatDuration}
                         removeSongFromPlaylist={removeSongFromPlaylist}
@@ -665,9 +759,14 @@ const PlaylistCreator = ({ existingPlaylist, onSaveSuccess }) => {
             )}
 
             <div className="pt-6 border-t border-slate-700 flex flex-col sm:flex-row gap-4">
-                <button type="button" onClick={() => { handleSavePlaylistToFirestore(); }} disabled={isSaving || !theme.trim() || songs.length === 0} className="w-full flex items-center justify-center px-8 py-3 bg-green-600 hover:bg-green-700 text-white text-lg font-bold rounded-lg shadow-xl transition-all duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50">
+                <button 
+                    type="button" 
+                    onClick={handleSavePlaylistToFirestore} 
+                    disabled={isSaving || !theme.trim() || songs.length === 0} 
+                    className="w-full flex items-center justify-center px-8 py-3 bg-green-600 hover:bg-green-700 text-white text-lg font-bold rounded-lg shadow-xl transition-all duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50"
+                >
                     {isSaving ? <Loader2 className="animate-spin mr-2" size={24}/> : <Save className="mr-2" size={24} />}
-                    {existingPlaylist ? 'Update Mixtape' : 'Save Mixtape'}
+                    {editingPlaylistId && !isRemix ? 'Update Mixtape' : 'Save Mixtape'}
                 </button>
             </div>
         </div>

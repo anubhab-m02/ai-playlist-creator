@@ -5,22 +5,20 @@ import Footer from './components/Footer';
 import AuthPage from './components/AuthPage';
 import Dashboard from './components/Dashboard';
 import PlaylistCreator from './components/PlaylistCreator';
-// Removed: import SpotifyCallbackHandler from './components/SpotifyCallbackHandler';
 import { Loader2 } from 'lucide-react';
 
 function AppContent() {
     const [currentView, setCurrentView] = useState('loading'); // loading, auth, dashboard, creator
-    const [editingPlaylist, setEditingPlaylist] = useState(null);
+    const [editingPlaylist, setEditingPlaylist] = useState(null); // Can be playlist object or null
+    const [isRemixing, setIsRemixing] = useState(false); // Flag for remix operation
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const firebase = useFirebase();
 
     useEffect(() => {
         const handleAuthAndPath = () => {
-            // Removed /callback path handling
             if (firebase?.isLoadingAuth) {
                 setCurrentView('loading');
             } else if (firebase?.currentUser) {
-                // If user is logged in, default to dashboard or stay on current relevant view
                 if (currentView === 'auth' || currentView === 'loading') {
                     setCurrentView('dashboard');
                 }
@@ -31,11 +29,13 @@ function AppContent() {
         handleAuthAndPath();
     }, [firebase?.isLoadingAuth, firebase?.currentUser, currentView]);
 
-    const navigateTo = (view, playlist = null) => {
-        setEditingPlaylist(playlist);
+    const navigateTo = (view, playlistData = null, isRemixOp = false) => {
+        setEditingPlaylist(playlistData); // Store the full playlist data
+        setIsRemixing(isRemixOp);      // Set the remix flag
         setCurrentView(view);
         setIsMobileMenuOpen(false);
-        // Simplified navigation, no longer need to worry about /callback
+        
+        // Basic path update, can be enhanced with actual routing library later
         const newPath = view === 'dashboard' ? '/' : (view === 'auth' ? '/auth' : `/${view}`);
         if (window.location.pathname !== newPath) {
              window.history.pushState({}, '', newPath);
@@ -48,12 +48,18 @@ function AppContent() {
     } else if (currentView === 'auth') {
         content = <AuthPage onAuthSuccess={() => navigateTo('dashboard')} />;
     } else if (currentView === 'dashboard') {
-        content = <Dashboard onEditPlaylist={(p) => navigateTo('creator', p)} />;
+        content = <Dashboard 
+                    onEditPlaylist={(p) => navigateTo('creator', p, false)} 
+                    onRemixPlaylist={(p) => navigateTo('creator', p, true)} // Pass true for isRemixOp
+                  />;
     } else if (currentView === 'creator') {
-        content = <PlaylistCreator existingPlaylist={editingPlaylist} onSaveSuccess={() => navigateTo('dashboard')} />;
-    // Removed: else if (currentView === 'callback') { content = <SpotifyCallbackHandler onCallbackProcessed={() => navigateTo('dashboard')}/>; }
-    } else { // Default view logic
-        content = firebase?.currentUser ? <Dashboard onEditPlaylist={(p) => navigateTo('creator', p)} /> : <AuthPage onAuthSuccess={() => navigateTo('dashboard')} />;
+        content = <PlaylistCreator 
+                    existingPlaylist={editingPlaylist} 
+                    onSaveSuccess={() => navigateTo('dashboard')}
+                    isRemix={isRemixing} // Pass the isRemixing flag
+                  />;
+    } else { 
+        content = firebase?.currentUser ? <Dashboard onEditPlaylist={(p) => navigateTo('creator', p, false)} onRemixPlaylist={(p) => navigateTo('creator', p, true)} /> : <AuthPage onAuthSuccess={() => navigateTo('dashboard')} />;
     }
 
     return (
