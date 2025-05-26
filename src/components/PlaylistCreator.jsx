@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useFirebase } from '../firebase';
 import Alert from './Alert';
-// Removed PlaylistFormHeader, GeminiSuggestionsDisplay, CurrentMixtapeDisplay imports as their content is moved to steps
 import Step1Foundation from './Step1Foundation';
 import Step2Curation from './Step2Curation';
 import Step3FinalTouches from './Step3FinalTouches';
 import Modal from './Modal'; 
 import ManageTagsModal from './ManageTagsModal'; 
-import { Loader2, LogIn, ChevronLeft, AlertTriangle } from 'lucide-react'; 
+import { Loader2, LogIn, ChevronLeft, AlertTriangle, CheckCircle } from 'lucide-react'; 
 import { collection, addDoc, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 
 const formatDuration = (totalMilliseconds) => {
@@ -25,11 +24,11 @@ const formatDuration = (totalMilliseconds) => {
 const PlaylistCreator = ({ existingPlaylist, onSaveSuccess, isRemix = false }) => {
     const { db, currentUser, appId, isLoadingAuth } = useFirebase();
 
-    // State for current step
     const [currentStep, setCurrentStep] = useState(1);
-    const totalSteps = 3;
+    const stepNames = ["Foundation", "Curate Songs", "Final Touches"];
+    const totalSteps = stepNames.length;
 
-    // All existing state variables remain here
+
     const [theme, setTheme] = useState('');
     const [originalThemePrompt, setOriginalThemePrompt] = useState('');
     const [songs, setSongs] = useState([]);
@@ -71,7 +70,7 @@ const PlaylistCreator = ({ existingPlaylist, onSaveSuccess, isRemix = false }) =
 
     const dragSongItem = useRef(null);
     const dragOverSongItem = useRef(null);
-    const songsListRef = useRef(null); // Ref for current mixtape song list
+    const songsListRef = useRef(null);
     const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
 
     useEffect(() => {
@@ -80,7 +79,6 @@ const PlaylistCreator = ({ existingPlaylist, onSaveSuccess, isRemix = false }) =
             if (onSaveSuccess) onSaveSuccess(); 
             return;
         }
-        // Reset step to 1 when existingPlaylist or isRemix changes, or on initial load
         setCurrentStep(1); 
 
         if (existingPlaylist) {
@@ -572,11 +570,9 @@ const PlaylistCreator = ({ existingPlaylist, onSaveSuccess, isRemix = false }) =
         }
     };
 
-    // Stepper navigation
     const nextStep = () => setCurrentStep(prev => Math.min(prev + 1, totalSteps));
     const prevStep = () => setCurrentStep(prev => Math.max(prev - 1, 1));
 
-    // Total duration calculation remains
     const totalPlaylistDurationMs = useMemo(() => songs.reduce((total, song) => total + (Number(song.duration_ms) || 0), 0), [songs]);
 
     if (isLoadingAuth) {
@@ -586,14 +582,31 @@ const PlaylistCreator = ({ existingPlaylist, onSaveSuccess, isRemix = false }) =
         return (<div className="text-center py-10 text-gray-400 flex-grow flex flex-col items-center justify-center"><LogIn size={48} className="mx-auto mb-4" /><h2 className="text-2xl mb-2">Please sign in</h2><p>You need to be signed in to create or edit a mixtape.</p></div>);
     }
 
-    // Stepper progress bar
-    const progressPercentage = (currentStep / totalSteps) * 100;
-
     return (
-        <div className="max-w-4xl mx-auto bg-slate-800/70 p-4 md:p-6 lg:px-8 lg:py-8 rounded-xl shadow-2xl backdrop-blur-sm space-y-6">
+        <div className="max-w-5xl mx-auto bg-slate-800/60 p-4 md:p-6 lg:px-8 lg:py-8 rounded-xl shadow-2xl backdrop-blur-md space-y-6 border border-slate-700/50">
             {showDuplicateSongModal && songToAddDespiteDuplicate && (
                 <Modal title="Duplicate Song Alert" onClose={handleCancelAddDuplicate}>
-                    {/* ... modal content ... */}
+                    <div className="text-center">
+                        <AlertTriangle size={48} className="mx-auto mb-4 text-yellow-400" />
+                        <p className="text-lg text-gray-200 mb-2">
+                            The song <strong className="text-purple-300">"{songToAddDespiteDuplicate.title}"</strong> by <strong className="text-purple-300">{songToAddDespiteDuplicate.artist}</strong> is already in your mixtape.
+                        </p>
+                        <p className="text-gray-400 mb-6">Do you want to add it again?</p>
+                        <div className="flex justify-center space-x-4">
+                            <button
+                                onClick={handleCancelAddDuplicate}
+                                className="px-6 py-2 rounded-md text-sm font-medium bg-slate-600 hover:bg-slate-500 text-white transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleAddAnyway}
+                                className="px-6 py-2 rounded-md text-sm font-medium bg-purple-600 hover:bg-purple-700 text-white transition-colors"
+                            >
+                                Add Anyway
+                            </button>
+                        </div>
+                    </div>
                 </Modal>
             )}
             <ManageTagsModal
@@ -603,87 +616,132 @@ const PlaylistCreator = ({ existingPlaylist, onSaveSuccess, isRemix = false }) =
                 onSaveTags={handleSaveManagedTags} 
             />
 
-            {/* Header section (Back button, Title) */}
-            <div className="mb-4">
+            <div className="mb-6">
                 <button type="button" onClick={() => { console.log("PC: Back to Dashboard clicked"); if(onSaveSuccess) onSaveSuccess(); }} className="flex items-center text-purple-400 hover:text-purple-300 mb-3 text-sm transition-colors">
                     <ChevronLeft size={18} className="mr-1" /> Back to Dashboard
                 </button>
-                <h2 className="text-2xl lg:text-3xl font-semibold text-purple-300 mb-1">
+                <h2 className="text-3xl lg:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-500 mb-2">
                     {editingPlaylistId && !isRemix ? 'Edit Mixtape' : (isRemix ? 'Remixing Mixtape' : 'Create New Mixtape')}
                 </h2>
-                <p className="text-xs text-gray-400">Step {currentStep} of {totalSteps}: Craft the perfect vibe.</p>
             </div>
 
-            {/* Progress Bar */}
-            <div className="w-full bg-slate-700 rounded-full h-2.5 mb-6">
-                <div 
-                    className="bg-purple-600 h-2.5 rounded-full transition-all duration-500 ease-out" 
-                    style={{ width: `${progressPercentage}%` }}
-                ></div>
-            </div>
+            {/* Enhanced Stepper Navigation */}
+            <nav aria-label="Progress" className="mb-8">
+                <ol role="list" className="flex items-center justify-between space-x-2 md:space-x-4">
+                    {stepNames.map((stepName, stepIdx) => {
+                        const stepNumber = stepIdx + 1;
+                        const isCompleted = currentStep > stepNumber;
+                        const isActive = currentStep === stepNumber;
+
+                        return (
+                            <li key={stepName} className={`flex-1 ${stepIdx < totalSteps -1 ? 'pr-2 md:pr-4 relative' : ''}`}>
+                                {isCompleted ? (
+                                    <div className="group flex flex-col items-center w-full">
+                                        <span className="flex items-center text-sm font-medium">
+                                            <span className="flex-shrink-0 flex items-center justify-center w-10 h-10 bg-purple-600 rounded-full">
+                                                <CheckCircle className="w-6 h-6 text-white" aria-hidden="true" />
+                                            </span>
+                                        </span>
+                                        <span className="text-xs text-center mt-2 font-medium text-purple-300">{stepName}</span>
+                                        {stepIdx < totalSteps - 1 && (
+                                          <div className="hidden sm:block absolute top-5 left-full w-full h-0.5 bg-purple-600 -translate-x-1/2" aria-hidden="true" />
+                                        )}
+                                    </div>
+                                ) : isActive ? (
+                                    <div className="flex flex-col items-center w-full" aria-current="step">
+                                        <span className="flex items-center text-sm font-medium">
+                                            <span className="flex-shrink-0 flex items-center justify-center w-10 h-10 border-2 border-purple-500 bg-purple-500/30 rounded-full">
+                                                <span className="text-purple-200">{`0${stepNumber}`}</span>
+                                            </span>
+                                        </span>
+                                        <span className="text-xs text-center mt-2 font-semibold text-purple-200">{stepName}</span>
+                                        {stepIdx < totalSteps - 1 && (
+                                            <div className="hidden sm:block absolute top-5 left-full w-full h-0.5 bg-slate-700 -translate-x-1/2" aria-hidden="true" />
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div className="group flex flex-col items-center w-full">
+                                        <span className="flex items-center text-sm font-medium">
+                                            <span className="flex-shrink-0 flex items-center justify-center w-10 h-10 border-2 border-slate-600 rounded-full group-hover:border-slate-500">
+                                                <span className="text-slate-500 group-hover:text-slate-400">{`0${stepNumber}`}</span>
+                                            </span>
+                                        </span>
+                                        <span className="text-xs text-center mt-2 font-medium text-slate-500 group-hover:text-slate-400">{stepName}</span>
+                                        {stepIdx < totalSteps - 1 && (
+                                            <div className="hidden sm:block absolute top-5 left-full w-full h-0.5 bg-slate-700 -translate-x-1/2" aria-hidden="true" />
+                                        )}
+                                    </div>
+                                )}
+                            </li>
+                        );
+                    })}
+                </ol>
+            </nav>
 
 
             {error && <Alert type="error">{error}</Alert>}
             {successMessage && <Alert type="success">{successMessage}</Alert>}
 
-            {/* Render current step */}
-            {currentStep === 1 && (
-                <Step1Foundation
-                    theme={theme} handleThemeInputChange={handleThemeInputChange} 
-                    originalThemePrompt={originalThemePrompt} isLoadingTitle={isLoadingTitle} 
-                    handleSuggestPlaylistTitle={handleSuggestPlaylistTitle} 
-                    suggestedTitles={suggestedTitles} setTheme={setTheme} setSuggestedTitles={setSuggestedTitles}
-                    currentTagInput={currentTagInput} setCurrentTagInput={setCurrentTagInput} 
-                    handleAddTag={handleAddTag} tags={tags} handleRemoveTag={handleRemoveTag} 
-                    onOpenManageTags={() => setIsManageTagsModalOpen(true)}
-                    currentSeedSong={currentSeedSong} setCurrentSeedSong={setCurrentSeedSong} 
-                    handleAddSeedSong={handleAddSeedSong} seedSongInputs={seedSongInputs} 
-                    handleRemoveSeedSong={handleRemoveSeedSong}
-                    onNextStep={nextStep}
-                />
-            )}
-            {currentStep === 2 && (
-                <Step2Curation
-                    startYear={startYear} setStartYear={setStartYear} endYear={endYear} setEndYear={setEndYear}
-                    languagePreferences={languagePreferences} setLanguagePreferences={setLanguagePreferences}
-                    preferHiddenGems={preferHiddenGems} setPreferHiddenGems={setPreferHiddenGems}
-                    excludeKeywords={excludeKeywords} setExcludeKeywords={setExcludeKeywords}
-                    instrumentalVocalRatio={instrumentalVocalRatio} setInstrumentalVocalRatio={setInstrumentalVocalRatio}
-                    fusionGenres={fusionGenres} currentFusionGenreInput={currentFusionGenreInput} 
-                    setCurrentFusionGenreInput={setCurrentFusionGenreInput} handleAddFusionGenre={handleAddFusionGenre} 
-                    handleRemoveFusionGenre={handleRemoveFusionGenre}
-                    storyNarrative={storyNarrative} setStoryNarrative={setStoryNarrative}
-                    vibeArcDescription={vibeArcDescription} setVibeArcDescription={setVibeArcDescription}
-                    isLoadingSuggestions={isLoadingSuggestions} songs={songs} 
-                    originalThemePrompt={originalThemePrompt} theme={theme} seedSongInputs={seedSongInputs}
-                    handleGetSongIdeas={handleGetSongIdeas}
-                    aiSuggestions={aiSuggestions} addSongToPlaylist={addSongToPlaylist}
-                    currentSongs={songs} songsListRef={songsListRef} 
-                    totalPlaylistDurationMs={totalPlaylistDurationMs} formatDuration={formatDuration}
-                    removeSongFromPlaylist={removeSongFromPlaylist} handleEditSongNote={handleEditSongNote} 
-                    editingNoteForSongId={editingNoteForSongId} currentSongNote={currentSongNote} 
-                    setCurrentSongNote={setCurrentSongNote} handleSaveSongNote={handleSaveSongNote} 
-                    handleCancelEditSongNote={handleCancelEditSongNote}
-                    handleDragStart={handleDragStart} handleDragEnter={handleDragEnter} 
-                    handleDragLeave={handleDragLeave} handleDragEnd={handleDragEnd} 
-                    handleDragOver={handleDragOver} handleDrop={handleDrop}
-                    onPrevStep={prevStep} onNextStep={nextStep}
-                />
-            )}
-            {currentStep === 3 && (
-                <Step3FinalTouches
-                    coverArtUrl={coverArtUrl} setCoverArtUrl={setCoverArtUrl}
-                    linerNotes={linerNotes} setLinerNotes={setLinerNotes} 
-                    isLoadingLinerNotes={isLoadingLinerNotes} handleGenerateLinerNotes={handleGenerateLinerNotes}
-                    isPublic={isPublic} setIsPublic={setIsPublic}
-                    songs={songs} originalThemePrompt={originalThemePrompt} theme={theme}
-                    isLoadingFutureIdeas={isLoadingFutureIdeas} futurePlaylistIdeas={futurePlaylistIdeas} 
-                    handleGetFutureIdeas={handleGetFutureIdeas}
-                    isSaving={isSaving} handleSavePlaylistToFirestore={handleSavePlaylistToFirestore} 
-                    existingPlaylist={existingPlaylist} isRemix={isRemix}
-                    onPrevStep={prevStep}
-                />
-            )}
+            {/* Step Content Area - this div can control the overall height of the step content area */}
+            <div className="mt-6 min-h-[calc(100vh-450px)]"> {/* Example: min-height to encourage less page scroll */}
+                {currentStep === 1 && (
+                    <Step1Foundation key="step1"
+                        theme={theme} handleThemeInputChange={handleThemeInputChange} 
+                        originalThemePrompt={originalThemePrompt} isLoadingTitle={isLoadingTitle} 
+                        handleSuggestPlaylistTitle={handleSuggestPlaylistTitle} 
+                        suggestedTitles={suggestedTitles} setTheme={setTheme} setSuggestedTitles={setSuggestedTitles}
+                        currentTagInput={currentTagInput} setCurrentTagInput={setCurrentTagInput} 
+                        handleAddTag={handleAddTag} tags={tags} handleRemoveTag={handleRemoveTag} 
+                        onOpenManageTags={() => setIsManageTagsModalOpen(true)}
+                        currentSeedSong={currentSeedSong} setCurrentSeedSong={setCurrentSeedSong} 
+                        handleAddSeedSong={handleAddSeedSong} seedSongInputs={seedSongInputs} 
+                        handleRemoveSeedSong={handleRemoveSeedSong}
+                        onNextStep={nextStep}
+                    />
+                )}
+                {currentStep === 2 && (
+                    <Step2Curation key="step2"
+                        startYear={startYear} setStartYear={setStartYear} endYear={endYear} setEndYear={setEndYear}
+                        languagePreferences={languagePreferences} setLanguagePreferences={setLanguagePreferences}
+                        preferHiddenGems={preferHiddenGems} setPreferHiddenGems={setPreferHiddenGems}
+                        excludeKeywords={excludeKeywords} setExcludeKeywords={setExcludeKeywords}
+                        instrumentalVocalRatio={instrumentalVocalRatio} setInstrumentalVocalRatio={setInstrumentalVocalRatio}
+                        fusionGenres={fusionGenres} currentFusionGenreInput={currentFusionGenreInput} 
+                        setCurrentFusionGenreInput={setCurrentFusionGenreInput} handleAddFusionGenre={handleAddFusionGenre} 
+                        handleRemoveFusionGenre={handleRemoveFusionGenre}
+                        storyNarrative={storyNarrative} setStoryNarrative={setStoryNarrative}
+                        vibeArcDescription={vibeArcDescription} setVibeArcDescription={setVibeArcDescription}
+                        isLoadingSuggestions={isLoadingSuggestions} songs={songs} 
+                        originalThemePrompt={originalThemePrompt} theme={theme} seedSongInputs={seedSongInputs}
+                        handleGetSongIdeas={handleGetSongIdeas}
+                        aiSuggestions={aiSuggestions} addSongToPlaylist={addSongToPlaylist}
+                        currentSongs={songs} songsListRef={songsListRef} 
+                        totalPlaylistDurationMs={totalPlaylistDurationMs} formatDuration={formatDuration}
+                        removeSongFromPlaylist={removeSongFromPlaylist} handleEditSongNote={handleEditSongNote} 
+                        editingNoteForSongId={editingNoteForSongId} currentSongNote={currentSongNote} 
+                        setCurrentSongNote={setCurrentSongNote} handleSaveSongNote={handleSaveSongNote} 
+                        handleCancelEditSongNote={handleCancelEditSongNote}
+                        handleDragStart={handleDragStart} handleDragEnter={handleDragEnter} 
+                        handleDragLeave={handleDragLeave} handleDragEnd={handleDragEnd} 
+                        handleDragOver={handleDragOver} handleDrop={handleDrop}
+                        onPrevStep={prevStep} onNextStep={nextStep}
+                    />
+                )}
+                {currentStep === 3 && (
+                    <Step3FinalTouches key="step3"
+                        coverArtUrl={coverArtUrl} setCoverArtUrl={setCoverArtUrl}
+                        linerNotes={linerNotes} setLinerNotes={setLinerNotes} 
+                        isLoadingLinerNotes={isLoadingLinerNotes} handleGenerateLinerNotes={handleGenerateLinerNotes}
+                        isPublic={isPublic} setIsPublic={setIsPublic}
+                        songs={songs} originalThemePrompt={originalThemePrompt} theme={theme}
+                        isLoadingFutureIdeas={isLoadingFutureIdeas} futurePlaylistIdeas={futurePlaylistIdeas} 
+                        handleGetFutureIdeas={handleGetFutureIdeas}
+                        isSaving={isSaving} handleSavePlaylistToFirestore={handleSavePlaylistToFirestore} 
+                        existingPlaylist={existingPlaylist} isRemix={isRemix}
+                        onPrevStep={prevStep}
+                    />
+                )}
+            </div>
         </div>
     );
 };
