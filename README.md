@@ -70,7 +70,7 @@ Mixtape Maestro is packed with features to make playlist creation intuitive, fun
 
 1.  **Clone the repository (if applicable, otherwise ensure you have all project files):**
     ```bash
-    git clone <your-repository-url>
+    git clone <https://github.com/anubhab-m02/ai-playlist-creator>
     cd mixtape-maestro 
     ```
 
@@ -138,9 +138,9 @@ Mixtape Maestro is packed with features to make playlist creation intuitive, fun
     * `AuthPage.jsx`: Handles user sign-in and sign-up.
     * `Dashboard.jsx`: Displays user's mixtapes.
     * `PlaylistCreator.jsx`: The main component for creating and editing mixtapes, manages the stepper UI.
-        * `Step1Foundation.jsx`: First step of the playlist creation wizard.
-        * `Step2Curation.jsx`: Second step, focusing on AI suggestions and song list.
-        * `Step3FinalTouches.jsx`: Final step for cover, notes, and saving.
+    * `Step1Foundation.jsx`: First step of the playlist creation wizard.
+    * `Step2Curation.jsx`: Second step, focusing on AI suggestions and song list.
+    * `Step3FinalTouches.jsx`: Final step for cover, notes, and saving.
     * `PlaylistCard.jsx`: Displays individual mixtape cards on the dashboard.
     * `GeminiSuggestionsDisplay.jsx`: Shows AI-generated song ideas.
     * `CurrentMixtapeDisplay.jsx`: Shows the songs currently added to the mixtape being created.
